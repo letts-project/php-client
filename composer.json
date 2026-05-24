@@ -1,0 +1,47 @@
+{
+    "name": "letts/php-client",
+    "description": "PHP client and mission runtime for the letts/dugdale distributed task queue.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["letts", "dugdale", "task-queue", "mission", "rpc"],
+    "homepage": "https://git.eswyft.org/letts/php-client",
+    "support": {
+        "source": "https://git.eswyft.org/letts/php-client"
+    },
+    "require": {
+        "php": "^8.3",
+        "ext-curl": "*",
+        "ext-pcntl": "*",
+        "ext-posix": "*",
+        "symfony/http-client": "^7.0",
+        "symfony/yaml": "^7.0"
+    },
+    "require-dev": {
+        "ext-sockets": "*",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Letts\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Letts\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --testsuite=unit",
+        "build-daemon": "tools/build-dugdale.sh",
+        "test:integration": ["@build-daemon", "phpunit --testsuite=integration"],
+        "test:all": ["@test", "@test:integration"]
+    },
+    "scripts-descriptions": {
+        "build-daemon": "Rebuild tools/dugdale from the letts Go source (set LETTS_SRC to override path).",
+        "test:integration": "Rebuild the daemon, then run integration tests against it."
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}
