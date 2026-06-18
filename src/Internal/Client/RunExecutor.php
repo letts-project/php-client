@@ -27,7 +27,7 @@ final class RunExecutor
      * @param array<string, string> $files
      */
     public function run(
-        ?string $route, ?string $host, array $match,
+        ?string $route, int|string|null $host, array $match,
         ?string $lane,
         string  $mission,
         array   $input,

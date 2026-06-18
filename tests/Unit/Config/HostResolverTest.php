@@ -42,6 +42,21 @@ final class HostResolverTest extends TestCase
         $this->assertSame('s3', $r->resolve('local'));
     }
 
+    public function testResolvesNumericServerIdViaAlias(): void
+    {
+        // A numeric server id may be passed as an int; it is cast to its
+        // string alias key ("5"). PHP normalizes numeric string keys to int,
+        // so a `5 => ...` alias entry matches whether the lookup key is int
+        // or string.
+        $c = new Config(
+            aliases: [5 => 'prj5'],
+            dugdales: [new Dugdale(id: 'prj5')],
+        );
+        $r = $this->resolver($c);
+        $this->assertSame('prj5', $r->resolve(5));
+        $this->assertSame('prj5', $r->resolve('5'));
+    }
+
     public function testUnknownHostThrows(): void
     {
         $c = new Config(dugdales: [new Dugdale(id: 's1')]);

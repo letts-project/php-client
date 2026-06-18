@@ -26,7 +26,7 @@ final class DispatchExecutor
      * @return array{missionId: string, host: string}
      */
     public function dispatch(
-        ?string $route, ?string $host, array $match,
+        ?string $route, int|string|null $host, array $match,
         ?string $lane,
         string $mission,
         array $input,
@@ -71,7 +71,7 @@ final class DispatchExecutor
      * @param list<string> $match
      * @return array{host: string, lane: string}
      */
-    public function resolveTarget(?string $route, ?string $host, array $match, ?string $lane): array
+    public function resolveTarget(?string $route, int|string|null $host, array $match, ?string $lane): array
     {
         $hasRoute = $route !== null && $route !== '';
         $hasHost  = $host !== null && $host !== '';

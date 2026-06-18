@@ -59,6 +59,29 @@ final class ConfigValidatorTest extends TestCase
         $this->assertTrue(true);
     }
 
+    public function testAcceptsNumericAliasKey(): void
+    {
+        // Numeric server ids (e.g. `5: s5`) are valid alias keys even
+        // though they cannot be dugdale ids.
+        ConfigValidator::validate(new Config(
+            aliases: [5 => 's5'],
+            dugdales: [new Dugdale(id: 's5')],
+        ));
+        $this->assertTrue(true);
+    }
+
+    public function testCatchesBadAliasKey(): void
+    {
+        // Relaxing the leading-digit rule must not loosen the charset: a space
+        // or uppercase still makes an invalid alias key.
+        $this->expectException(ConfigException::class);
+        $this->expectExceptionMessage('invalid alias key');
+        ConfigValidator::validate(new Config(
+            aliases: ['BAD KEY' => 's1'],
+            dugdales: [new Dugdale(id: 's1')],
+        ));
+    }
+
     public function testCatchesPortOutOfRange(): void
     {
         $this->expectException(ConfigException::class);

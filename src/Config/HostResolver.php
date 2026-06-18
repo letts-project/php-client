@@ -18,10 +18,13 @@ final class HostResolver
         private readonly EnvSubstitutor $env,
     ) {}
 
-    public function resolve(string $host): string
+    public function resolve(int|string $host): string
     {
         $visited = [];
-        $cur = $host;
+        // Accept a numeric server id (e.g. 5) and look it up as a string alias
+        // key ("5"). PHP normalizes numeric string array keys back to int, so
+        // a `5: ...` alias entry is matched either way.
+        $cur = (string) $host;
         // Strict `<` so the cap is exactly MAX_DEPTH hops (mirrors Go, which
         // tightened this from `<=` to avoid allowing one extra hop).
         for ($depth = 0; $depth < self::MAX_DEPTH; $depth++) {

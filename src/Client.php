@@ -169,7 +169,7 @@ final class Client
      */
     public function dispatch(
         string  $mission,
-        ?string $route = null, ?string $host = null, array $match = [],
+        ?string $route = null, int|string|null $host = null, array $match = [],
         ?string $lane = null,
         array   $input = [],
         array   $files = [],
@@ -193,7 +193,7 @@ final class Client
      * @param list<string> $match
      * @return list<string>
      */
-    private function effectiveMatch(?string $route, ?string $host, array $match): array
+    private function effectiveMatch(?string $route, int|string|null $host, array $match): array
     {
         if ($match !== []) {
             return $match;
@@ -211,7 +211,7 @@ final class Client
      */
     public function run(
         string  $mission,
-        ?string $route = null, ?string $host = null, array $match = [],
+        ?string $route = null, int|string|null $host = null, array $match = [],
         ?string $lane = null,
         array   $input = [],
         array   $files = [],
@@ -234,7 +234,7 @@ final class Client
 
     /**
      * @param list<array{
-     *   route?: string, host?: string, match?: list<string>,
+     *   route?: string, host?: int|string, match?: list<string>,
      *   lane?: string, mission: string, input?: array<string, mixed>,
      *   files?: array<string, string>, timeout?: string,
      * }> $jobs
@@ -311,7 +311,7 @@ final class Client
         return \Letts\Config\HostSelector::candidates($this->config, $match);
     }
 
-    public function getMission(string $id, ?string $host = null): ?\Letts\Result\MissionInfo
+    public function getMission(string $id, int|string|null $host = null): ?\Letts\Result\MissionInfo
     {
         if ($host !== null) {
             return $this->getMissionOnHost($id, $this->hostResolver->resolve($host));
@@ -351,7 +351,7 @@ final class Client
      * @param array<string, mixed> $filters
      * @return list<\Letts\Result\MissionInfo>
      */
-    public function listMissions(?string $host = null, array $filters = []): array
+    public function listMissions(int|string|null $host = null, array $filters = []): array
     {
         if ($host === null) {
             throw new \Letts\Exceptions\BadRequestException('host is required for listMissions');
@@ -378,7 +378,7 @@ final class Client
      * misreport `mission_done`. On NetworkException the caller decides —
      * e.g. check getMission() first.
      */
-    public function kill(string $id, string $signal = 'TERM', ?string $host = null): void
+    public function kill(string $id, string $signal = 'TERM', int|string|null $host = null): void
     {
         if ($host === null) {
             throw new \Letts\Exceptions\BadRequestException('host is required for kill');
@@ -388,7 +388,7 @@ final class Client
             ->jsonRequest('POST', "/v1/missions/$id/kill", body: ['signal' => $signal]);
     }
 
-    public function restart(string $id, ?string $host = null): string
+    public function restart(string $id, int|string|null $host = null): string
     {
         if ($host === null) {
             throw new \Letts\Exceptions\BadRequestException('host is required for restart');
@@ -399,7 +399,7 @@ final class Client
         return (string) ($resp['mission_id'] ?? '');
     }
 
-    public function delete(string $id, ?string $host = null, bool $force = false): void
+    public function delete(string $id, int|string|null $host = null, bool $force = false): void
     {
         if ($host === null) {
             throw new \Letts\Exceptions\BadRequestException('host is required for delete');

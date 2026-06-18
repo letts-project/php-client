@@ -40,7 +40,7 @@ ways (combining them throws `BadRequestException`):
 | Mode | Argument | Lane | Meaning |
 |------|----------|------|---------|
 | **route** | `route: 'normal'` | from route | A named `(host, lane)` pair defined in `letts.yaml`. |
-| **host** | `host: 's1'` | `lane:` **required** | A dugdale id, or an alias that resolves to one. |
+| **host** | `host: 's1'` or `host: 5` | `lane:` **required** | A dugdale id, or an alias that resolves to one. A numeric server id may be passed as an `int`; it is cast to its string alias key. |
 | **match** | `match: ['prod']` | `lane:` **required** | Auto-select a dugdale carrying **all** the given labels **and** declaring the lane. |
 
 When neither `route` nor `host` is given, the auto-select label filter resolves
@@ -439,8 +439,11 @@ routes:
   bulk:   {host: s1, lane: high}
 
 # Host aliases resolved to a dugdale id (cycle-checked, max 8 hops; ${ENV} ok).
+# Alias keys may lead with a digit, so a numeric server id works as a key
+# (host: 5 → looked up as "5").
 aliases:
   primary: s1
+  5: s5
 
 # Reusable blocks dugdales can `extends`.
 templates:

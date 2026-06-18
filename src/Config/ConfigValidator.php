@@ -65,7 +65,7 @@ final class ConfigValidator
         }
 
         foreach ($c->aliases as $key => $val) {
-            if (!NameValidator::isDugdaleId((string) $key)) {
+            if (!NameValidator::isAliasKey((string) $key)) {
                 throw new ConfigException("aliases[\"$key\"]: invalid alias key");
             }
             if (isset($seenIds[$key])) {
