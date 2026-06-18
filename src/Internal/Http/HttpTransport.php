@@ -24,6 +24,7 @@ final class HttpTransport
         private readonly string $baseUrl,
         private readonly string $token,
         private readonly string $host = '',
+        private readonly bool $streamFreshConnection = false,
     ) {}
 
     /**
@@ -104,10 +105,24 @@ final class HttpTransport
     /** Returns raw streaming response for NDJSON consumers. */
     public function streamRequest(string $method, string $path): ResponseInterface
     {
-        return $this->client->request($method, $this->baseUrl . $path, [
+        $opts = [
             'headers' => ['Authorization: Bearer ' . $this->token],
             'buffer'  => false,
-        ]);
+        ];
+        if ($this->streamFreshConnection) {
+            // Force a dedicated, non-pooled TCP connection for the long-lived
+            // events stream instead of reusing the dispatch POST's keep-alive
+            // socket. Sometimes helps with Russian TSPU, that lets the first
+            // request on a connection through but silently drops later segments
+            // — the terminal `done` event — on a *reused* cross-border
+            // connection, while a fresh connection passes. CurlHttpClient only;
+            // ignored by other transports.
+            $opts['extra']['curl'] = [
+                \CURLOPT_FRESH_CONNECT => true,
+                \CURLOPT_FORBID_REUSE  => true,
+            ];
+        }
+        return $this->client->request($method, $this->baseUrl . $path, $opts);
     }
 
     /**

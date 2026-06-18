@@ -115,4 +115,31 @@ final class HttpTransportTest extends TestCase
             $this->assertSame('s7', $e->getHost());
         }
     }
+
+    public function testStreamRequestDefaultReusesConnection(): void
+    {
+        $seen = null;
+        $mock = new MockHttpClient(function (string $m, string $u, array $options) use (&$seen) {
+            $seen = $options;
+            return new MockResponse('', ['http_code' => 200]);
+        });
+        $t = new HttpTransport($mock, 'http://h:7180', 'tok');
+        $t->streamRequest('GET', '/v1/missions/x/events?follow=true')->getStatusCode();
+        $this->assertFalse($seen['buffer']);
+        $this->assertArrayNotHasKey('extra', $seen, 'default must not force a fresh connection');
+    }
+
+    public function testStreamRequestForcesFreshConnectionWhenEnabled(): void
+    {
+        $seen = null;
+        $mock = new MockHttpClient(function (string $m, string $u, array $options) use (&$seen) {
+            $seen = $options;
+            return new MockResponse('', ['http_code' => 200]);
+        });
+        $t = new HttpTransport($mock, 'http://h:7180', 'tok', 's1', streamFreshConnection: true);
+        $t->streamRequest('GET', '/v1/missions/x/events?follow=true')->getStatusCode();
+        $this->assertFalse($seen['buffer']);
+        $this->assertTrue($seen['extra']['curl'][\CURLOPT_FRESH_CONNECT] ?? null);
+        $this->assertTrue($seen['extra']['curl'][\CURLOPT_FORBID_REUSE] ?? null);
+    }
 }

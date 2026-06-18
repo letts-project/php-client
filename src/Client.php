@@ -34,6 +34,7 @@ final class Client
      *   connect_timeout?: int, request_timeout?: int,
      *   max_connections_per_host?: int,
      *   retry_attempts?: int, retry_backoff?: list<int>,
+     *   stream_fresh_connection?: bool,
      * } $opts
      * @param list<string> $matchOverride
      */
@@ -58,6 +59,7 @@ final class Client
      *   connect_timeout?: int, request_timeout?: int,
      *   max_connections_per_host?: int,
      *   retry_attempts?: int, retry_backoff?: list<int>,
+     *   stream_fresh_connection?: bool,
      * } $opts
      */
     public static function fromConfig(
@@ -115,7 +117,10 @@ final class Client
             }
             $baseUrl = $this->baseUrlFor($d);
             $token = $this->tokenResolver->resolve($dugdaleId, $scope);
-            $http = new HttpTransport($this->http, $baseUrl, $token, $dugdaleId);
+            $http = new HttpTransport(
+                $this->http, $baseUrl, $token, $dugdaleId,
+                streamFreshConnection: (bool) ($this->opts['stream_fresh_connection'] ?? false),
+            );
             $retry = new RetryClient(
                 $http,
                 maxAttempts: (int) ($this->opts['retry_attempts'] ?? 3),
