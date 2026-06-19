@@ -142,4 +142,43 @@ final class HttpTransportTest extends TestCase
         $this->assertTrue($seen['extra']['curl'][\CURLOPT_FRESH_CONNECT] ?? null);
         $this->assertTrue($seen['extra']['curl'][\CURLOPT_FORBID_REUSE] ?? null);
     }
+
+    public function testProxyInjectedIntoJsonRequest(): void
+    {
+        $seen = null;
+        $mock = new MockHttpClient(function (string $m, string $u, array $options) use (&$seen) {
+            $seen = $options;
+            return new MockResponse('{"ok":true}', ['http_code' => 200]);
+        });
+        $t = new HttpTransport($mock, 'http://h:7180', 'tok', 's1', proxy: 'socks5h://127.0.0.1:1080');
+        $t->jsonRequest('GET', '/v1/dugdale');
+        $this->assertSame('socks5h://127.0.0.1:1080', $seen['proxy'] ?? null);
+        // no_proxy must be forced empty so an ambient NO_PROXY can't bypass us.
+        $this->assertSame('', $seen['no_proxy'] ?? null);
+    }
+
+    public function testProxyInjectedIntoStreamRequest(): void
+    {
+        $seen = null;
+        $mock = new MockHttpClient(function (string $m, string $u, array $options) use (&$seen) {
+            $seen = $options;
+            return new MockResponse('', ['http_code' => 200]);
+        });
+        $t = new HttpTransport($mock, 'http://h:7180', 'tok', 's1', proxy: 'socks5h://127.0.0.1:1080');
+        $t->streamRequest('GET', '/v1/missions/x/events?follow=true')->getStatusCode();
+        $this->assertSame('socks5h://127.0.0.1:1080', $seen['proxy'] ?? null);
+    }
+
+    public function testNoProxyOptionWhenUnset(): void
+    {
+        $seen = null;
+        $mock = new MockHttpClient(function (string $m, string $u, array $options) use (&$seen) {
+            $seen = $options;
+            return new MockResponse('{"ok":true}', ['http_code' => 200]);
+        });
+        $t = new HttpTransport($mock, 'http://h:7180', 'tok', 's1');
+        $t->jsonRequest('GET', '/v1/dugdale');
+        $this->assertArrayNotHasKey('proxy', $seen);
+        $this->assertArrayNotHasKey('no_proxy', $seen);
+    }
 }

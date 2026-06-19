@@ -123,6 +123,26 @@ final class ExtendsMergerTest extends TestCase
         $this->assertArrayNotHasKey('parsers', $lanes);
     }
 
+    public function testProxyInheritedFromTemplate(): void
+    {
+        $c = new Config(
+            templates: ['k' => new Template(proxy: 'socks5h://10.0.0.1:1080')],
+            dugdales: [new Dugdale(id: 's1', extends: 'k')],
+        );
+        $merged = ExtendsMerger::merge($c);
+        $this->assertSame('socks5h://10.0.0.1:1080', $merged->dugdales[0]->proxy);
+    }
+
+    public function testProxyOverriddenByDugdale(): void
+    {
+        $c = new Config(
+            templates: ['k' => new Template(proxy: 'socks5h://10.0.0.1:1080')],
+            dugdales: [new Dugdale(id: 's1', extends: 'k', proxy: 'socks5h://127.0.0.1:9050')],
+        );
+        $merged = ExtendsMerger::merge($c);
+        $this->assertSame('socks5h://127.0.0.1:9050', $merged->dugdales[0]->proxy);
+    }
+
     public function testUnknownTemplateThrows(): void
     {
         $c = new Config(dugdales: [new Dugdale(id: 's1', extends: 'missing')]);

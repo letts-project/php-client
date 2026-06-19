@@ -16,6 +16,7 @@ final readonly class Template
         public string $token = '',
         public string $adminToken = '',
         public string $execToken = '',
+        public string $proxy = '',
         public array $lanes = [],
     ) {}
 }

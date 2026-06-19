@@ -25,6 +25,22 @@ final class ConfigParserTest extends TestCase
         $this->assertSame(4, $c->dugdales[0]->lanes['normal']->concurrency);
     }
 
+    public function testParsesPerDugdaleProxy(): void
+    {
+        $yaml = <<<YAML
+        templates:
+          k:
+            proxy: "socks5h://10.0.0.1:1080"
+        dugdales:
+          - id: s1
+            host: h
+            proxy: "socks5h://127.0.0.1:1080"
+        YAML;
+        $c = ConfigParser::parse($yaml);
+        $this->assertSame('socks5h://127.0.0.1:1080', $c->dugdales[0]->proxy);
+        $this->assertSame('socks5h://10.0.0.1:1080', $c->templates['k']->proxy);
+    }
+
     public function testParseFullExample(): void
     {
         $yaml = <<<YAML

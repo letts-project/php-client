@@ -16,6 +16,7 @@ final readonly class Dugdale
         public string $host = '',
         public int $port = 0,
         public string $url = '',
+        public string $proxy = '',
         public string $extends = '',
         public string $missionDir = '',
         public Runtime $runtime = new Runtime(),

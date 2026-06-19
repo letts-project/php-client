@@ -68,6 +68,7 @@ final class ExtendsMerger
             host: $d->host,
             port: $d->port,
             url: $d->url,
+            proxy: $d->proxy !== '' ? $d->proxy : $t->proxy,
             extends: $d->extends,
             missionDir: $d->missionDir !== '' ? $d->missionDir : $t->missionDir,
             runtime: $runtime,

@@ -8,6 +8,7 @@ use Letts\Config\Config;
 use Letts\Config\ConfigLoader;
 use Letts\Config\EnvSubstitutor;
 use Letts\Config\HostResolver;
+use Letts\Config\ProxyResolver;
 use Letts\Config\Scope;
 use Letts\Config\TokenResolver;
 use Letts\Internal\Http\HttpTransport;
@@ -34,7 +35,7 @@ final class Client
      *   connect_timeout?: int, request_timeout?: int,
      *   max_connections_per_host?: int,
      *   retry_attempts?: int, retry_backoff?: list<int>,
-     *   stream_fresh_connection?: bool,
+     *   stream_fresh_connection?: bool, ignore_proxy?: bool,
      * } $opts
      * @param list<string> $matchOverride
      */
@@ -44,6 +45,7 @@ final class Client
         private readonly HttpClientInterface $http,
         private readonly HostResolver $hostResolver,
         private readonly TokenResolver $tokenResolver,
+        private readonly ProxyResolver $proxyResolver,
         private readonly array $matchOverride = [],
     ) {}
 
@@ -59,7 +61,7 @@ final class Client
      *   connect_timeout?: int, request_timeout?: int,
      *   max_connections_per_host?: int,
      *   retry_attempts?: int, retry_backoff?: list<int>,
-     *   stream_fresh_connection?: bool,
+     *   stream_fresh_connection?: bool, ignore_proxy?: bool,
      * } $opts
      */
     public static function fromConfig(
@@ -103,6 +105,7 @@ final class Client
             $config, $opts, $http,
             new HostResolver($config, $env),
             new TokenResolver($config, $env),
+            new ProxyResolver($config, $env),
         );
     }
 
@@ -117,9 +120,11 @@ final class Client
             }
             $baseUrl = $this->baseUrlFor($d);
             $token = $this->tokenResolver->resolve($dugdaleId, $scope);
+            $proxy = ($this->opts['ignore_proxy'] ?? false) ? '' : $this->proxyResolver->resolve($dugdaleId);
             $http = new HttpTransport(
                 $this->http, $baseUrl, $token, $dugdaleId,
                 streamFreshConnection: (bool) ($this->opts['stream_fresh_connection'] ?? false),
+                proxy: $proxy,
             );
             $retry = new RetryClient(
                 $http,
@@ -159,7 +164,7 @@ final class Client
     {
         return new self(
             $this->config, $this->opts, $this->http,
-            $this->hostResolver, $this->tokenResolver,
+            $this->hostResolver, $this->tokenResolver, $this->proxyResolver,
             $match,
         );
     }

@@ -109,7 +109,7 @@ final class ConfigParser
             if (!is_array($t)) {
                 throw new ConfigException("templates[$name]: must be a mapping");
             }
-            self::checkKeys($t, ['mission_dir','runtime','labels','token','admin_token','exec_token','lanes'], "templates[$name]");
+            self::checkKeys($t, ['mission_dir','runtime','labels','token','admin_token','exec_token','proxy','lanes'], "templates[$name]");
             $out[(string) $name] = new Template(
                 missionDir: (string) ($t['mission_dir'] ?? ''),
                 runtime: self::buildRuntime($t['runtime'] ?? []),
@@ -117,6 +117,7 @@ final class ConfigParser
                 token: (string) ($t['token'] ?? ''),
                 adminToken: (string) ($t['admin_token'] ?? ''),
                 execToken: (string) ($t['exec_token'] ?? ''),
+                proxy: (string) ($t['proxy'] ?? ''),
                 lanes: self::buildLanes($t['lanes'] ?? []),
             );
         }
@@ -134,7 +135,7 @@ final class ConfigParser
             if (!is_array($entry)) {
                 throw new ConfigException("dugdales[$i]: must be a mapping");
             }
-            self::checkKeys($entry, ['id','host','port','url','extends','mission_dir','runtime','labels','token','admin_token','exec_token','lanes'], "dugdales[$i]");
+            self::checkKeys($entry, ['id','host','port','url','proxy','extends','mission_dir','runtime','labels','token','admin_token','exec_token','lanes'], "dugdales[$i]");
             $id = (string) ($entry['id'] ?? '');
             if ($id === '') {
                 throw new ConfigException("dugdales[$i]: id is required");
@@ -159,6 +160,7 @@ final class ConfigParser
                 host: (string) ($entry['host'] ?? ''),
                 port: (int) ($entry['port'] ?? 0),
                 url: (string) ($entry['url'] ?? ''),
+                proxy: (string) ($entry['proxy'] ?? ''),
                 extends: (string) ($entry['extends'] ?? ''),
                 missionDir: (string) ($entry['mission_dir'] ?? ''),
                 runtime: self::buildRuntime($entry['runtime'] ?? []),

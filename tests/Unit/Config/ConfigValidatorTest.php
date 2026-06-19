@@ -59,6 +59,37 @@ final class ConfigValidatorTest extends TestCase
         $this->assertTrue(true);
     }
 
+    public function testRejectsNonSocksProxyScheme(): void
+    {
+        $this->expectException(ConfigException::class);
+        $this->expectExceptionMessageMatches('/dugdales\[0\].*socks5/');
+        ConfigValidator::validate(new Config(
+            dugdales: [new Dugdale(id: 's1', proxy: 'http://127.0.0.1:8080')],
+        ));
+    }
+
+    public function testRejectsBadProxySchemeOnTemplate(): void
+    {
+        $this->expectException(ConfigException::class);
+        $this->expectExceptionMessageMatches('/templates\["k"\].*socks5/');
+        ConfigValidator::validate(new Config(templates: ['k' => new Template(proxy: 'ftp://x')]));
+    }
+
+    public function testAcceptsSocks5AndSocks5hProxy(): void
+    {
+        ConfigValidator::validate(new Config(dugdales: [
+            new Dugdale(id: 's1', proxy: 'socks5://h:1080'),
+            new Dugdale(id: 's2', proxy: 'socks5h://h:1080'),
+        ]));
+        $this->assertTrue(true);
+    }
+
+    public function testAcceptsEnvProxyValue(): void
+    {
+        ConfigValidator::validate(new Config(dugdales: [new Dugdale(id: 's1', proxy: '${PROXY}')]));
+        $this->assertTrue(true);
+    }
+
     public function testAcceptsNumericAliasKey(): void
     {
         // Numeric server ids (e.g. `5: s5`) are valid alias keys even

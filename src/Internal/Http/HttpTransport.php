@@ -25,7 +25,25 @@ final class HttpTransport
         private readonly string $token,
         private readonly string $host = '',
         private readonly bool $streamFreshConnection = false,
+        private readonly string $proxy = '',
     ) {}
+
+    /**
+     * Applies the per-dugdale SOCKS5 proxy to a request options array. Also
+     * forces no_proxy empty so an ambient NO_PROXY/no_proxy env (common in
+     * Docker and CI shells) cannot silently bypass a config-declared proxy.
+     *
+     * @param array<string, mixed> $opts
+     * @return array<string, mixed>
+     */
+    private function withProxy(array $opts): array
+    {
+        if ($this->proxy !== '') {
+            $opts['proxy'] = $this->proxy;
+            $opts['no_proxy'] = '';
+        }
+        return $opts;
+    }
 
     /**
      * @param array<string, mixed>|null $body
@@ -47,6 +65,7 @@ final class HttpTransport
             $opts['body'] = json_encode($body, JSON_THROW_ON_ERROR);
             $opts['headers'][] = 'Content-Type: application/json';
         }
+        $opts = $this->withProxy($opts);
 
         try {
             $response = $this->client->request($method, $this->baseUrl . $path, $opts);
@@ -77,9 +96,9 @@ final class HttpTransport
     public function head(string $path): array
     {
         try {
-            $response = $this->client->request('HEAD', $this->baseUrl . $path, [
+            $response = $this->client->request('HEAD', $this->baseUrl . $path, $this->withProxy([
                 'headers' => ['Authorization: Bearer ' . $this->token],
-            ]);
+            ]));
             $status = $response->getStatusCode();
         } catch (TransportException $e) {
             throw new \Letts\Exceptions\NetworkException($this->host, $e->getMessage(), $e);
@@ -122,6 +141,7 @@ final class HttpTransport
                 \CURLOPT_FORBID_REUSE  => true,
             ];
         }
+        $opts = $this->withProxy($opts);
         return $this->client->request($method, $this->baseUrl . $path, $opts);
     }
 
@@ -164,6 +184,7 @@ final class HttpTransport
             $opts['body'] = $body;
             $opts['headers'][] = "Content-Type: $contentType";
         }
+        $opts = $this->withProxy($opts);
         try {
             $response = $this->client->request($method, $this->baseUrl . $path, $opts);
             $status = $response->getStatusCode();

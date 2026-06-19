@@ -25,6 +25,7 @@ final class ConfigValidator
             if ($d->port < 0 || $d->port > 65535) {
                 throw new ConfigException("dugdales[$i]: port {$d->port} out of range (0-65535)");
             }
+            self::validateProxy($d->proxy, "dugdales[$i]");
             if (isset($seenIds[$d->id])) {
                 throw new ConfigException("dugdales[$i]: duplicate id \"$d->id\"");
             }
@@ -46,6 +47,7 @@ final class ConfigValidator
             if (!NameValidator::isTemplateName((string) $name)) {
                 throw new ConfigException("templates[\"$name\"]: invalid template name");
             }
+            self::validateProxy($t->proxy, "templates[\"$name\"]");
             foreach (array_keys($t->lanes) as $lane) {
                 if (!NameValidator::isLaneName((string) $lane)) {
                     throw new ConfigException("templates[\"$name\"].lanes: invalid lane name \"$lane\"");
@@ -79,6 +81,23 @@ final class ConfigValidator
             if (!str_contains($val, '${') && !NameValidator::isDugdaleId($val)) {
                 throw new ConfigException("aliases[\"$key\"] value: invalid dugdale id \"$val\"");
             }
+        }
+    }
+
+    /**
+     * Validates a per-dugdale (or per-template) proxy URL: only socks5:// and
+     * socks5h:// are accepted. An empty value means "connect directly" and a
+     * value carrying a ${VAR} placeholder is skipped here (it is checked after
+     * env substitution at use), mirroring how alias values are handled.
+     */
+    private static function validateProxy(string $proxy, string $where): void
+    {
+        if ($proxy === '' || str_contains($proxy, '${')) {
+            return;
+        }
+        $scheme = strtolower((string) parse_url($proxy, PHP_URL_SCHEME));
+        if ($scheme !== 'socks5' && $scheme !== 'socks5h') {
+            throw new ConfigException("$where: proxy must be socks5:// or socks5h://, got \"$proxy\"");
         }
     }
 }
