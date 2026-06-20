@@ -243,6 +243,35 @@ final class Client
     }
 
     /**
+     * Download a mission output file straight into memory and return its bytes.
+     *
+     * Use this instead of run(downloadOutputsTo: ...) when the output is small
+     * enough to hold in memory and you want it as a string rather than a file
+     * on disk. Valid keys are array_keys($result->outputFiles). The body is
+     * streamed from staging and verified against the size/sha256 announced in
+     * the done event. Throws BadRequestException if $key is not among the run's
+     * outputs; StagingException if the download or verification fails. Both
+     * extend LettsException, so a blanket catch still covers them.
+     */
+    public function downloadOutput(\Letts\Result\RunResult $result, string $key): string
+    {
+        $meta = $result->outputFiles[$key] ?? null;
+        if ($meta === null) {
+            $have = array_keys($result->outputFiles);
+            throw new \Letts\Exceptions\BadRequestException(
+                "no output file with key \"$key\""
+                . ($have !== [] ? ' (have: ' . implode(', ', $have) . ')' : ''),
+            );
+        }
+        $sid = (string) ($meta['staging_id'] ?? '');
+        if ($sid === '') {
+            throw new \Letts\Exceptions\StagingException("output \"$key\" has no staging id");
+        }
+        return (new \Letts\Internal\Client\RunExecutor($this))
+            ->fetchStagingToString($result->host, $sid, $meta);
+    }
+
+    /**
      * @param list<array{
      *   route?: string, host?: int|string, match?: list<string>,
      *   lane?: string, mission: string, input?: array<string, mixed>,

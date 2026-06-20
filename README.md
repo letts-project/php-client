@@ -151,6 +151,14 @@ Notes:
   streamed to `<dir>/<role>` (never buffered whole in memory) and verified
   against the size/sha256 from the terminal event; a failed or short download
   raises `StagingException` and leaves no partial file behind.
+- **`Client::downloadOutput($result, $key): string`** is the in-memory
+  counterpart of `downloadOutputsTo`: it streams one registered output file
+  straight into a string (same size/sha256 verification) instead of to disk.
+  Use it for outputs small enough to hold in memory that you want as a value
+  rather than a file on disk — no need to pass `downloadOutputsTo`. Throws
+  `BadRequestException` if `$key` is not among the run's outputs, or
+  `StagingException` if the download or verification fails (both extend
+  `LettsException`).
 - **`timeout`** is enforced by the daemon on the mission; **`waitTimeout`** is how
   long the client waits before giving up on the stream — past it `run()` throws
   `WaitTimeoutException` while the mission keeps running on the daemon.

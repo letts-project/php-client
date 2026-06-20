@@ -20,4 +20,13 @@ final class ClientRunOutputFileTest extends DugdaleFixture
         unlink("$dir/result");
         rmdir($dir);
     }
+
+    public function testOutputFileReadIntoMemory(): void
+    {
+        $r = $this->client()->run(
+            host: 'local', lane: 'normal', mission: 'output_file',
+        );
+        $this->assertTrue($r->isSuccess());
+        $this->assertSame('hello-from-mission', $this->client()->downloadOutput($r, 'result'));
+    }
 }

@@ -184,17 +184,80 @@ final class RunExecutor
     /**
      * Stream one staging artifact to disk. Output files routinely exceed the
      * PHP memory limit, so the body is written chunk-by-chunk into a .partial
-     * file, hashed on the fly, verified against the size/sha256 announced in
-     * the done event, and only then renamed into place. Any shortfall (disk
-     * full, dropped transfer, content mismatch) surfaces as StagingException
-     * with no half-written file left at the destination path.
+     * file (never buffered whole), verified against the size/sha256 announced
+     * in the done event by the shared streamStagingVerified() core, and only
+     * then renamed into place. Any shortfall (disk full, dropped transfer,
+     * content mismatch) surfaces as StagingException with no half-written file
+     * left at the destination path.
      *
      * @param array{staging_id?: string, sha256?: string, size?: int} $meta
      */
     private function downloadOne(\Letts\Internal\Http\HttpTransport $t, string $sid, string $dest, array $meta): void
     {
-        // buffer:false so the body is consumed straight to disk instead of
-        // also being staged in Symfony's in-memory/temp buffer first.
+        $tmp = "$dest.partial";
+        // buffer:false (in streamStagingVerified) so the body is consumed
+        // straight into this file instead of being staged in Symfony's buffer.
+        $out = @fopen($tmp, 'wb');
+        if ($out === false) {
+            throw new StagingException("cannot write $tmp");
+        }
+        try {
+            $this->streamStagingVerified($t, $sid, $meta, static function (string $data) use ($out, $tmp): void {
+                if (fwrite($out, $data) !== strlen($data)) {
+                    throw new StagingException("short write to $tmp (disk full?)");
+                }
+            });
+            fclose($out);
+            $out = null;
+            if (!@rename($tmp, $dest)) {
+                throw new StagingException("cannot move downloaded file into place: $dest");
+            }
+        } catch (\Throwable $e) {
+            if (is_resource($out)) {
+                fclose($out);
+            }
+            @unlink($tmp);
+            throw $e;
+        }
+    }
+
+    /**
+     * Stream a staging artifact fully into memory and return its bytes,
+     * verifying byte count and sha256 via the shared streamStagingVerified()
+     * core. In-memory counterpart to downloadOne() (which streams to disk);
+     * use only when the artifact is small enough to hold in memory — the
+     * announced size bounds the buffer, but a large *declared* output will
+     * still exhaust memory, so prefer downloadOutputsTo for big files.
+     *
+     * @param array{staging_id?: string, sha256?: string, size?: int} $meta
+     */
+    public function fetchStagingToString(string $host, string $sid, array $meta): string
+    {
+        $t = $this->client->rawTransportFor($host, Scope::Dispatch);
+        $buf = '';
+        $this->streamStagingVerified($t, $sid, $meta, static function (string $data) use (&$buf): void {
+            $buf .= $data;
+        });
+        return $buf;
+    }
+
+    /**
+     * Shared GET /v1/staging/<sid> core for both download paths: opens the
+     * stream with buffer:false, validates HTTP status, feeds each body chunk
+     * to $sink while hashing on the fly, then verifies byte count and sha256
+     * against the metadata from the done event. The body can never
+     * legitimately exceed the announced size, so an overrun is aborted
+     * mid-stream — that bounds memory for the in-memory sink (and disk for the
+     * file sink) instead of trusting the after-the-fact size check. Every
+     * failure (transport error, HTTP >= 400, sink error, size/sha256 mismatch)
+     * surfaces as StagingException.
+     *
+     * @param array{staging_id?: string, sha256?: string, size?: int} $meta
+     * @param callable(string): void $sink consumes each verified chunk; may throw
+     */
+    private function streamStagingVerified(
+        \Letts\Internal\Http\HttpTransport $t, string $sid, array $meta, callable $sink,
+    ): void {
         $response = $t->streamRequest('GET', "/v1/staging/$sid");
         try {
             $status = $response->getStatusCode();
@@ -205,53 +268,38 @@ final class RunExecutor
             $response->cancel();
             throw new StagingException("staging $sid not downloadable: HTTP $status");
         }
-        $tmp = "$dest.partial";
-        $out = @fopen($tmp, 'wb');
-        if ($out === false) {
-            throw new StagingException("cannot write $tmp");
-        }
+        $wantSize = (int) ($meta['size'] ?? 0);
+        $hash = hash_init('sha256');
+        $bytes = 0;
         try {
-            $hash = hash_init('sha256');
-            $bytes = 0;
-            try {
-                foreach ($t->streamChunks($response) as $chunk) {
-                    if ($chunk->isTimeout() || $chunk->isFirst()) {
-                        continue;
-                    }
-                    $data = $chunk->getContent();
-                    if ($data === '') {
-                        continue;
-                    }
-                    hash_update($hash, $data);
-                    if (fwrite($out, $data) !== strlen($data)) {
-                        throw new StagingException("short write to $tmp (disk full?)");
-                    }
-                    $bytes += strlen($data);
+            foreach ($t->streamChunks($response) as $chunk) {
+                if ($chunk->isTimeout() || $chunk->isFirst()) {
+                    continue;
                 }
-            } catch (\Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface $e) {
-                throw new StagingException("download of staging $sid failed: " . $e->getMessage(), 0, $e);
+                $data = $chunk->getContent();
+                if ($data === '') {
+                    continue;
+                }
+                // Stop a runaway/over-declared transfer before it grows the
+                // sink past the size the done event announced.
+                if ($wantSize > 0 && $bytes + strlen($data) > $wantSize) {
+                    $response->cancel();
+                    throw new StagingException("staging $sid: body exceeds announced $wantSize bytes");
+                }
+                hash_update($hash, $data);
+                $sink($data);
+                $bytes += strlen($data);
             }
-            fclose($out);
-            $out = null;
-
-            $wantSize = (int) ($meta['size'] ?? 0);
-            if ($wantSize > 0 && $bytes !== $wantSize) {
-                throw new StagingException("staging $sid: downloaded $bytes bytes, expected $wantSize");
-            }
-            $wantSha = (string) ($meta['sha256'] ?? '');
-            $gotSha = hash_final($hash);
-            if ($wantSha !== '' && !hash_equals($wantSha, $gotSha)) {
-                throw new StagingException("staging $sid: sha256 mismatch (got $gotSha, expected $wantSha)");
-            }
-            if (!@rename($tmp, $dest)) {
-                throw new StagingException("cannot move downloaded file into place: $dest");
-            }
-        } catch (\Throwable $e) {
-            if (is_resource($out)) {
-                fclose($out);
-            }
-            @unlink($tmp);
-            throw $e;
+        } catch (\Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface $e) {
+            throw new StagingException("download of staging $sid failed: " . $e->getMessage(), 0, $e);
+        }
+        if ($wantSize > 0 && $bytes !== $wantSize) {
+            throw new StagingException("staging $sid: downloaded $bytes bytes, expected $wantSize");
+        }
+        $wantSha = (string) ($meta['sha256'] ?? '');
+        $gotSha = hash_final($hash);
+        if ($wantSha !== '' && !hash_equals($wantSha, $gotSha)) {
+            throw new StagingException("staging $sid: sha256 mismatch (got $gotSha, expected $wantSha)");
         }
     }
 }
