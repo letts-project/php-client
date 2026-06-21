@@ -85,10 +85,10 @@ final class ConfigValidator
     }
 
     /**
-     * Validates a per-dugdale (or per-template) proxy URL: only socks5:// and
-     * socks5h:// are accepted. An empty value means "connect directly" and a
-     * value carrying a ${VAR} placeholder is skipped here (it is checked after
-     * env substitution at use), mirroring how alias values are handled.
+     * Validates a per-dugdale (or per-template) proxy URL. Accepted schemes are
+     * socks5, socks5h, http, and https. An empty value means "connect directly"
+     * and a value carrying a ${VAR} placeholder is skipped here (it is checked
+     * after env substitution at use), mirroring how alias values are handled.
      */
     private static function validateProxy(string $proxy, string $where): void
     {
@@ -96,8 +96,10 @@ final class ConfigValidator
             return;
         }
         $scheme = strtolower((string) parse_url($proxy, PHP_URL_SCHEME));
-        if ($scheme !== 'socks5' && $scheme !== 'socks5h') {
-            throw new ConfigException("$where: proxy must be socks5:// or socks5h://, got \"$proxy\"");
+        if (!in_array($scheme, ['socks5', 'socks5h', 'http', 'https'], true)) {
+            throw new ConfigException(
+                "$where: proxy scheme must be socks5, socks5h, http, or https, got \"$proxy\"",
+            );
         }
     }
 }

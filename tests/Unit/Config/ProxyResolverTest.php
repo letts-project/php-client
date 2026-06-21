@@ -49,6 +49,13 @@ final class ProxyResolverTest extends TestCase
         $this->assertSame('socks5h://user:socks5%3A%2F%2F@h:1080', $this->resolver($c)->resolve('s1'));
     }
 
+    public function testHttpProxyPassesThroughUnchanged(): void
+    {
+        // Only socks5:// is normalized; http/https/socks5h are left as-is.
+        $c = new Config(dugdales: [new Dugdale(id: 's1', proxy: 'http://10.0.0.1:3128')]);
+        $this->assertSame('http://10.0.0.1:3128', $this->resolver($c)->resolve('s1'));
+    }
+
     public function testEnvSubstitution(): void
     {
         $c = new Config(dugdales: [new Dugdale(id: 's1', proxy: 'socks5h://${PROXY_HOST}:1080')]);

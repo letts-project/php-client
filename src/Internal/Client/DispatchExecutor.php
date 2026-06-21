@@ -34,6 +34,34 @@ final class DispatchExecutor
         ?string $timeout,
         ?string $missionId,
     ): array {
+        $prep = $this->prepare($route, $host, $match, $lane, $mission, $input, $files, $timeout, $missionId);
+        $resp = $this->client->transportFor($prep['host'], Scope::Dispatch)->jsonRequest(
+            'POST', '/v1/dispatch', body: $prep['body'],
+            extraHeaders: ['Idempotency-Key' => $prep['missionId']],
+        );
+        return ['missionId' => (string) ($resp['mission_id'] ?? $prep['missionId']), 'host' => $prep['host']];
+    }
+
+    /**
+     * Resolves the target, uploads any files, and builds the /v1/dispatch
+     * request body — everything up to (but not including) the POST itself. Split
+     * out so a fan-out caller can prepare many jobs and then issue all their
+     * POSTs concurrently instead of one host at a time.
+     *
+     * @param array<string, string> $files
+     * @param array<string, mixed>  $input
+     * @param list<string>          $match
+     * @return array{host: string, missionId: string, body: array<string, mixed>}
+     */
+    public function prepare(
+        ?string $route, int|string|null $host, array $match,
+        ?string $lane,
+        string $mission,
+        array $input,
+        array $files,
+        ?string $timeout,
+        ?string $missionId,
+    ): array {
         $target = $this->resolveTarget($route, $host, $match, $lane);
         $hostId = $target['host'];
         $laneName = $target['lane'];
@@ -60,11 +88,7 @@ final class DispatchExecutor
         if ($timeout !== null) {
             $body['timeout'] = $timeout;
         }
-        $resp = $this->client->transportFor($hostId, Scope::Dispatch)->jsonRequest(
-            'POST', '/v1/dispatch', body: $body,
-            extraHeaders: ['Idempotency-Key' => $missionId],
-        );
-        return ['missionId' => (string) ($resp['mission_id'] ?? $missionId), 'host' => $hostId];
+        return ['host' => $hostId, 'missionId' => $missionId, 'body' => $body];
     }
 
     /**

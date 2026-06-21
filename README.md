@@ -525,12 +525,12 @@ dugdales:
     proxy: "socks5h://127.0.0.1:1080"  # reach this dugdale through a SOCKS5 proxy
 ```
 
-### Reaching a dugdale through a SOCKS5 proxy
+### Reaching a dugdale through a proxy
 
 A dugdale (or a template it `extends`) may declare a `proxy:` so that **every**
 connection to that dugdale — dispatch, the `run` event stream, parallel
-fan-out, staging upload and download, admin calls — tunnels through a SOCKS5
-proxy. Dugdales without a `proxy` connect directly.
+fan-out, staging upload and download, admin calls — tunnels through it. Dugdales
+without a `proxy` connect directly.
 
 ```yaml
 templates:
@@ -542,14 +542,16 @@ dugdales:
     extends: proxied                     # inherits the proxy
   - id: s4
     url: https://letts-s4.example.com
-    proxy: "socks5h://10.0.0.9:1080"     # its own proxy overrides any inherited one
+    proxy: "http://10.0.0.9:3128"        # its own proxy overrides any inherited one
 ```
 
-- Only `socks5://` and `socks5h://` are accepted; any other scheme is a config
-  error. Credentials may be embedded (`socks5h://user:pass@host:port`; percent-encode
-  special characters). `${ENV}` placeholders are substituted at use.
-- DNS is always resolved **at the proxy**: `socks5://` is normalized to
-  `socks5h://` before the request, matching the Go client. Write `socks5h://`.
+- Accepted schemes are `socks5://`, `socks5h://`, `http://`, and `https://`; any
+  other scheme is a config error. (An HTTP proxy such as Squid usually listens
+  on `:3128` — use `http://`, not `socks5://`, for it.) Credentials may be
+  embedded (`socks5h://user:pass@host:port`; percent-encode special characters).
+  `${ENV}` placeholders are substituted at use.
+- For SOCKS, DNS is always resolved **at the proxy**: `socks5://` is normalized
+  to `socks5h://` before the request, matching the Go client. Write `socks5h://`.
 - A dugdale's own `proxy` overrides the one it inherits via `extends`.
 - Pass `['ignore_proxy' => true]` to `Client::fromConfig()` to ignore all
   `proxy:` directives and connect to dugdales directly.
@@ -566,7 +568,7 @@ Key reference:
 | `templates.<name>` | reusable `{labels, lanes, tokens, …}` block |
 | `dugdales[].id` | **required**; unique; `^[a-z][a-z0-9_-]{0,63}$` |
 | `dugdales[].host` / `port` / `url` | endpoint (`url` overrides `host:port`) |
-| `dugdales[].proxy` | `socks5://` / `socks5h://` URL to tunnel all connections to this dugdale through (inheritable via `extends`) |
+| `dugdales[].proxy` | `socks5://` / `socks5h://` / `http://` / `https://` URL to tunnel all connections to this dugdale through (inheritable via `extends`) |
 | `dugdales[].extends` | name of a template to inherit from |
 | `dugdales[].labels` | tags used by `match` / `runOnAll` / `dugdales()` |
 | `dugdales[].lanes.<name>` | `{concurrency, paused}`; `null` deletes an inherited lane |

@@ -121,6 +121,53 @@ final class HttpTransport
         ];
     }
 
+    /**
+     * Creates a JSON POST as a lazy symfony response WITHOUT reading it, so a
+     * caller can issue many requests and then drive them concurrently over
+     * curl_multi (used by ParallelExecutor to fan out dispatch POSTs instead of
+     * sending them one host at a time). Read the result with completeJson().
+     *
+     * @param array<string, mixed>  $body
+     * @param array<string, string> $extraHeaders
+     */
+    public function requestLazyJson(string $method, string $path, array $body, array $extraHeaders = []): ResponseInterface
+    {
+        $headers = ['Authorization: Bearer ' . $this->token, 'Content-Type: application/json'];
+        foreach ($extraHeaders as $k => $v) {
+            $headers[] = "$k: $v";
+        }
+        $opts = $this->withProxy([
+            'headers' => $headers,
+            'body'    => json_encode($body, JSON_THROW_ON_ERROR),
+        ]);
+        return $this->client->request($method, $this->baseUrl . $path, $opts);
+    }
+
+    /**
+     * Reads and decodes a response created by requestLazyJson, applying the same
+     * status-to-exception mapping and NetworkException handling as jsonRequest.
+     * Reading the first such response drives every concurrently-issued request
+     * to completion over curl_multi.
+     *
+     * @return array<string, mixed>
+     */
+    public function completeJson(ResponseInterface $response): array
+    {
+        try {
+            $status = $response->getStatusCode();
+            $content = $response->getContent(throw: false);
+        } catch (TransportException $e) {
+            throw new \Letts\Exceptions\NetworkException($this->host, $e->getMessage(), $e);
+        }
+        if ($status >= 400) {
+            throw self::mapError($status, $content);
+        }
+        if ($content === '') {
+            return [];
+        }
+        return json_decode($content, true, flags: JSON_THROW_ON_ERROR);
+    }
+
     /** Returns raw streaming response for NDJSON consumers. */
     public function streamRequest(string $method, string $path): ResponseInterface
     {

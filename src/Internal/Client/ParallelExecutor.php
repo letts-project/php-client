@@ -47,17 +47,22 @@ final class ParallelExecutor
         $deadline = $waitTimeout !== null
             ? microtime(true) + RunExecutor::parseDuration($waitTimeout)
             : null;
-        /** @var array<int, array{host: string, mid: string, response: ResponseInterface, buf: string, done: ?Event}> */
-        $followers = [];
         /** @var array<int, HostResult> */
         $results = [];
 
+        // Phase 1: prepare each job (resolve target, upload files, build body)
+        // and issue its /v1/dispatch POST as a LAZY response. Creating every
+        // request before reading any lets curl_multi run them concurrently in
+        // phase 2, so one slow or unreachable host no longer blocks the others
+        // — the POSTs used to be sent (and retried) strictly one host at a time.
+        /** @var array<int, array{host: string, mid: string, post: ResponseInterface}> */
+        $posts = [];
         foreach ($jobs as $i => $j) {
             $hostHint = (string) ($j['host'] ?? '');
             // Assign the id pre-flight so a per-host launch failure carries it.
             $mid = \Letts\Internal\IdsUuidV7::generate();
             try {
-                $dr = (new DispatchExecutor($this->client))->dispatch(
+                $prep = (new DispatchExecutor($this->client))->prepare(
                     $j['route'] ?? null,
                     $j['host'] ?? null,
                     $j['match'] ?? [],
@@ -68,35 +73,35 @@ final class ParallelExecutor
                     $j['timeout'] ?? null,
                     $mid,
                 );
-                $resp = $this->client->rawTransportFor($dr['host'], Scope::Dispatch)
-                    ->streamRequest('GET', "/v1/missions/{$dr['missionId']}/events?follow=true");
-                $followers[$i] = [
-                    'host' => $dr['host'], 'mid' => $dr['missionId'],
-                    'response' => $resp, 'buf' => '', 'done' => null,
-                ];
-            } catch (AuthException $e) {
-                $results[$i] = new HostResult($hostHint, null, new HostError('auth', $e->getMessage(), 401));
-                $this->reportJobFailure($e, 'dispatch', $j, $mid);
-            } catch (BadRequestException $e) {
-                $results[$i] = new HostResult($hostHint, null, new HostError('bad_request', $e->getMessage(), 400));
-                $this->reportJobFailure($e, 'dispatch', $j, $mid);
-            } catch (ConflictException $e) {
-                $results[$i] = new HostResult($hostHint, null, new HostError('conflict', $e->getMessage(), 409));
-                $this->reportJobFailure($e, 'dispatch', $j, $mid);
-            } catch (BackpressureException $e) {
-                $results[$i] = new HostResult($hostHint, null, new HostError('backpressure', $e->getMessage(), 503));
-                $this->reportJobFailure($e, 'dispatch', $j, $mid);
-            } catch (StagingException $e) {
-                // Files are uploaded before the POST; without this arm a bad file
-                // would escape and abort the entire fan-out.
-                $results[$i] = new HostResult($hostHint, null, new HostError('staging', $e->getMessage(), null));
-                $this->reportJobFailure($e, 'dispatch', $j, $mid);
-            } catch (NetworkException|DispatchException $e) {
-                $results[$i] = new HostResult($hostHint, null, new HostError('network', $e->getMessage(), null));
+                $post = $this->client->rawTransportFor($prep['host'], Scope::Dispatch)
+                    ->requestLazyJson('POST', '/v1/dispatch', $prep['body'], ['Idempotency-Key' => $prep['missionId']]);
+                $posts[$i] = ['host' => $prep['host'], 'mid' => $prep['missionId'], 'post' => $post];
+            } catch (AuthException|BadRequestException|ConflictException|BackpressureException|StagingException|NetworkException|DispatchException $e) {
+                $results[$i] = new HostResult($hostHint, null, $this->toHostError($e));
                 $this->reportJobFailure($e, 'dispatch', $j, $mid);
             }
             // ConfigException / NoMatchingDugdaleException are intentionally NOT
             // caught — they are config-level and propagate (see design §5.2).
+        }
+
+        // Phase 2: complete the dispatch POSTs (the first read drives them all
+        // concurrently over curl_multi) and open each success's event stream.
+        /** @var array<int, array{host: string, mid: string, response: ResponseInterface, buf: string, done: ?Event}> */
+        $followers = [];
+        foreach ($posts as $i => $p) {
+            try {
+                $data = $this->client->rawTransportFor($p['host'], Scope::Dispatch)->completeJson($p['post']);
+                $mid = (string) ($data['mission_id'] ?? $p['mid']);
+                $resp = $this->client->rawTransportFor($p['host'], Scope::Dispatch)
+                    ->streamRequest('GET', "/v1/missions/$mid/events?follow=true");
+                $followers[$i] = [
+                    'host' => $p['host'], 'mid' => $mid,
+                    'response' => $resp, 'buf' => '', 'done' => null,
+                ];
+            } catch (AuthException|BadRequestException|ConflictException|BackpressureException|StagingException|NetworkException|DispatchException $e) {
+                $results[$i] = new HostResult($p['host'], null, $this->toHostError($e));
+                $this->reportJobFailure($e, 'dispatch', $jobs[$i], $p['mid']);
+            }
         }
 
         if ($followers !== []) {
@@ -125,6 +130,20 @@ final class ParallelExecutor
 
         ksort($results);
         return array_values($results);
+    }
+
+    /** Maps a dispatch-phase exception to its HostError kind. */
+    private function toHostError(LettsException $e): HostError
+    {
+        return match (true) {
+            $e instanceof AuthException         => new HostError('auth', $e->getMessage(), 401),
+            $e instanceof BadRequestException   => new HostError('bad_request', $e->getMessage(), 400),
+            $e instanceof ConflictException     => new HostError('conflict', $e->getMessage(), 409),
+            $e instanceof BackpressureException => new HostError('backpressure', $e->getMessage(), 503),
+            $e instanceof StagingException      => new HostError('staging', $e->getMessage(), null),
+            // NetworkException | DispatchException and any other dispatch error.
+            default                             => new HostError('network', $e->getMessage(), null),
+        };
     }
 
     /**

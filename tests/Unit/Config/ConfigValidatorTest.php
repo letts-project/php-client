@@ -59,27 +59,29 @@ final class ConfigValidatorTest extends TestCase
         $this->assertTrue(true);
     }
 
-    public function testRejectsNonSocksProxyScheme(): void
+    public function testRejectsUnknownProxyScheme(): void
     {
         $this->expectException(ConfigException::class);
-        $this->expectExceptionMessageMatches('/dugdales\[0\].*socks5/');
+        $this->expectExceptionMessageMatches('/dugdales\[0\].*scheme/');
         ConfigValidator::validate(new Config(
-            dugdales: [new Dugdale(id: 's1', proxy: 'http://127.0.0.1:8080')],
+            dugdales: [new Dugdale(id: 's1', proxy: 'ftp://127.0.0.1:8080')],
         ));
     }
 
     public function testRejectsBadProxySchemeOnTemplate(): void
     {
         $this->expectException(ConfigException::class);
-        $this->expectExceptionMessageMatches('/templates\["k"\].*socks5/');
+        $this->expectExceptionMessageMatches('/templates\["k"\].*scheme/');
         ConfigValidator::validate(new Config(templates: ['k' => new Template(proxy: 'ftp://x')]));
     }
 
-    public function testAcceptsSocks5AndSocks5hProxy(): void
+    public function testAcceptsSocksAndHttpProxySchemes(): void
     {
         ConfigValidator::validate(new Config(dugdales: [
             new Dugdale(id: 's1', proxy: 'socks5://h:1080'),
             new Dugdale(id: 's2', proxy: 'socks5h://h:1080'),
+            new Dugdale(id: 's3', proxy: 'http://h:3128'),
+            new Dugdale(id: 's4', proxy: 'https://h:3129'),
         ]));
         $this->assertTrue(true);
     }

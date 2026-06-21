@@ -4,10 +4,11 @@ declare(strict_types=1);
 namespace Letts\Config;
 
 /**
- * Resolves the effective SOCKS5 proxy URL for a dugdale: env-substitutes the
- * configured value and normalizes the scheme to socks5h:// so DNS is always
+ * Resolves the effective proxy URL for a dugdale: env-substitutes the
+ * configured value. A `socks5://` URL is normalized to `socks5h://` so DNS is
  * resolved at the proxy (parity with the Go client, whose x/net dialer is
- * always remote-DNS). An empty result means "no proxy, connect directly".
+ * always remote-DNS); `http://`, `https://`, and `socks5h://` pass through
+ * unchanged. An empty result means "no proxy, connect directly".
  *
  * Mirrors TokenResolver, but unlike a token an empty proxy is valid (not an
  * error), because most dugdales have no proxy at all.
