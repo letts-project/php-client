@@ -40,42 +40,60 @@ final class RunExecutor
         ?string $missionId,
         bool    $fetchLogs = false,
     ): RunResult {
-        $dispatch = new DispatchExecutor($this->client);
-        $dispatchResult = $dispatch->dispatch(
-            $route, $host, $match, $lane, $mission, $input,
-            $files, $timeout, $missionId,
-        );
+        // Assign the id pre-flight so a dispatch-phase failure carries it.
+        $missionId ??= \Letts\Internal\IdsUuidV7::generate();
+        try {
+            $dispatchResult = (new DispatchExecutor($this->client))->dispatch(
+                $route, $host, $match, $lane, $mission, $input,
+                $files, $timeout, $missionId,
+            );
+        } catch (\Letts\Exceptions\LettsException $e) {
+            $this->client->reportLaunchFailure($e, 'run', 'dispatch', $mission, $route, $host, $match, $lane, $input, $files, $timeout, $missionId);
+            throw $e;
+        }
         $hostId = $dispatchResult['host'];
         $mid = $dispatchResult['missionId'];
 
-        $rawT = $this->client->rawTransportFor($hostId, Scope::Dispatch);
-        $stream = new EventStream($rawT);
-
         $doneEv = null;
-        $deadline = null;
-        if ($waitTimeout !== null) {
-            $deadline = microtime(true) + self::parseDuration($waitTimeout);
-        }
-        $stream->follow(
-            "/v1/missions/$mid/events?follow=true",
-            function (Event $ev) use (&$doneEv, $onProgress): bool {
-                if ($ev->event === 'progress' && $onProgress !== null) {
-                    $onProgress($ev->value, $ev->message);
-                }
-                if ($ev->event === 'done') {
-                    $doneEv = $ev;
-                    return false;
-                }
-                return true;
-            },
-            maxReconnects: 3,
-            deadline: $deadline,
-        );
+        try {
+            $rawT = $this->client->rawTransportFor($hostId, Scope::Dispatch);
+            $stream = new EventStream($rawT);
 
-        if ($doneEv === null) {
-            throw new \Letts\Exceptions\NetworkException($hostId, 'event stream stopped before a terminal event');
+            $deadline = null;
+            if ($waitTimeout !== null) {
+                $deadline = microtime(true) + self::parseDuration($waitTimeout);
+            }
+            $stream->follow(
+                "/v1/missions/$mid/events?follow=true",
+                function (Event $ev) use (&$doneEv, $onProgress): bool {
+                    if ($ev->event === 'progress' && $onProgress !== null) {
+                        $onProgress($ev->value, $ev->message);
+                    }
+                    if ($ev->event === 'done') {
+                        $doneEv = $ev;
+                        return false;
+                    }
+                    return true;
+                },
+                maxReconnects: 3,
+                deadline: $deadline,
+            );
+
+            if ($doneEv === null) {
+                throw new \Letts\Exceptions\NetworkException($hostId, 'event stream stopped before a terminal event');
+            }
+        } catch (\Letts\Exceptions\WaitTimeoutException $e) {
+            // The mission launched and is still running on the daemon; we only
+            // stopped waiting. Not a launch failure — do not notify the observer.
+            throw $e;
+        } catch (\Letts\Exceptions\LettsException $e) {
+            $this->client->reportLaunchFailure($e, 'run', 'stream', $mission, $route, $host, $match, $lane, $input, $files, $timeout, $mid);
+            throw $e;
         }
 
+        // Past this point the mission has a terminal result. A StagingException
+        // from downloadOutputs (post-success) or a MissionFailedException is NOT
+        // a launch failure and intentionally bypasses the observer.
         $logs = $fetchLogs ? $this->fetchLogs($hostId, $mid) : new Logs();
         $result = self::buildResult($hostId, $mid, $doneEv, $logs);
 

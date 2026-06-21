@@ -85,7 +85,8 @@ $letts = Client::fromConfig('/path/letts.yaml', [
 ]);
 ```
 
-Both factories accept an optional injected `HttpClientInterface` for tests.
+Both factories accept an optional injected `HttpClientInterface` for tests, and
+an optional `onLaunchFailure` observer (see [Failure observer](#failure-observer)).
 Retries apply to network errors and `5xx` responses only — `4xx` (including
 `429`) is treated as definitive and not retried.
 
@@ -107,6 +108,11 @@ $id = $letts->dispatch(
 **Idempotency:** the mission id doubles as the `Idempotency-Key`. Re-dispatching
 the same `missionId` returns the same mission; reusing it with a *different*
 payload throws `ConflictException`.
+
+**`tryDispatch()`** takes the identical arguments but returns `?string`: on a
+launch failure it notifies the [failure observer](#failure-observer) and returns
+`null` instead of throwing — for fire-and-forget bulk loops where one unreachable
+dugdale must not abort the rest.
 
 ### `run()` — dispatch and wait
 
@@ -284,6 +290,45 @@ All extend `Letts\Exceptions\LettsException` (which extends `\RuntimeException`)
 
 In `runParallel()`/`runOnAll()` these dispatch errors are caught per-job and
 surfaced as `HostError` instead of thrown.
+
+### Failure observer
+
+A task that fails to *launch* (dugdale unreachable, network/auth/config error, a
+bad input file) surfaces as an exception at the call site. In a large codebase
+with hundreds of call sites, wrapping each in `try/catch` just to leave a trace
+is error-prone. Register one observer instead:
+
+```php
+$letts = Client::fromConfig('/path/letts.yaml', onLaunchFailure: function (Letts\Result\LaunchFailure $f) {
+    $logger->error("letts {$f->method} failed at {$f->phase}: {$f->exception->getMessage()}", [
+        'mission' => $f->mission, 'host' => $f->host,
+        'missionId' => $f->missionId, 'retryable' => $f->retryable,
+    ]);
+    if ($f->retryable && $f->phase === 'dispatch') {
+        $retryQueue->push($f);              // $f carries mission/input/files to re-dispatch
+    }
+});
+// or scoped, leaving the original untouched: $logging = $letts->withFailureObserver($observer);
+```
+
+It fires for every launch failure of `run()`, `dispatch()`, `tryDispatch()`, and
+per failed host of `runParallel()`/`runOnAll()`. It does **not** fire for
+`MissionFailedException` (the mission ran — that's a result) or
+`WaitTimeoutException` (it is still running). The observer is a pure side-effect
+channel: **control flow is unchanged** — `run()`/`dispatch()` still throw,
+`tryDispatch()` still returns `null` — and any exception it throws is swallowed
+(routed to `error_log`), so it can never break a call. Durability of the
+observer's own work (e.g. writing a retry record) is the caller's responsibility.
+
+`LaunchFailure` carries the original `exception`; a `retryable` flag (transient
+network/`5xx` vs deterministic); `method`; `phase` — `dispatch` (never started,
+re-dispatchable) or `stream` (already running on the daemon, reconnect instead of
+re-dispatching); and the full launch descriptor (`mission`, `route`, `host`,
+`match`, `lane`, `input`, `files`, `timeout`, `missionId`) — enough to recreate
+the task. `missionId` is assigned before the request, so re-dispatching with it
+is idempotent. Config-level fan-out failures (`ConfigException`,
+`NoMatchingDugdaleException` from `runParallel`/`runOnAll`) propagate as thrown
+exceptions rather than per-host observer calls.
 
 ---
 

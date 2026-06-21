@@ -47,13 +47,14 @@ final class Client
         private readonly TokenResolver $tokenResolver,
         private readonly ProxyResolver $proxyResolver,
         private readonly array $matchOverride = [],
+        private readonly ?\Closure $onLaunchFailure = null,
     ) {}
 
-    public static function default(?HttpClientInterface $http = null): self
+    public static function default(?HttpClientInterface $http = null, ?\Closure $onLaunchFailure = null): self
     {
         $env = static fn(string $k): ?string => ($v = getenv($k)) === false ? null : $v;
         $config = ConfigLoader::loadDefault($env);
-        return self::buildFromConfig($config, [], $http ?? HttpClient::create());
+        return self::buildFromConfig($config, [], $http ?? HttpClient::create(), $onLaunchFailure);
     }
 
     /**
@@ -68,6 +69,7 @@ final class Client
         string $path,
         array $opts = [],
         ?HttpClientInterface $http = null,
+        ?\Closure $onLaunchFailure = null,
     ): self {
         $config = ConfigLoader::loadFromPath($path);
         // max_connections_per_host is a client-level pool setting, not a
@@ -76,7 +78,7 @@ final class Client
         return self::buildFromConfig($config, $opts, $http ?? HttpClient::create(
             self::httpDefaultOptions($opts),
             $opts['max_connections_per_host'] ?? 4,
-        ));
+        ), $onLaunchFailure);
     }
 
     /**
@@ -98,7 +100,7 @@ final class Client
     }
 
     /** @param array<string, mixed> $opts */
-    private static function buildFromConfig(Config $config, array $opts, HttpClientInterface $http): self
+    private static function buildFromConfig(Config $config, array $opts, HttpClientInterface $http, ?\Closure $onLaunchFailure = null): self
     {
         $env = new EnvSubstitutor(static fn(string $k): ?string => ($v = getenv($k)) === false ? null : $v);
         return new self(
@@ -106,6 +108,7 @@ final class Client
             new HostResolver($config, $env),
             new TokenResolver($config, $env),
             new ProxyResolver($config, $env),
+            onLaunchFailure: $onLaunchFailure,
         );
     }
 
@@ -165,12 +168,59 @@ final class Client
         return new self(
             $this->config, $this->opts, $this->http,
             $this->hostResolver, $this->tokenResolver, $this->proxyResolver,
-            $match,
+            $match, $this->onLaunchFailure,
         );
     }
 
     /** @return list<string> */
     public function getMatchOverride(): array { return $this->matchOverride; }
+
+    /**
+     * Returns a scoped copy with a failure observer installed (or replaced).
+     * Preserves all other scoped state (notably the match override). The original
+     * instance is untouched. See reportLaunchFailure() for the observer contract.
+     */
+    public function withFailureObserver(\Closure $observer): self
+    {
+        return new self(
+            $this->config, $this->opts, $this->http,
+            $this->hostResolver, $this->tokenResolver, $this->proxyResolver,
+            $this->matchOverride, $observer,
+        );
+    }
+
+    /**
+     * @internal Build a LaunchFailure from a failed launch attempt and hand it to
+     * the registered observer; no-op when none is set. The observer is a pure
+     * side-effect channel: any Throwable it raises is swallowed (routed to
+     * error_log) so it can never alter dispatch/run/runParallel control flow.
+     *
+     * @param array<string, mixed>  $input
+     * @param array<string, string> $files
+     * @param list<string>          $match
+     */
+    public function reportLaunchFailure(
+        \Letts\Exceptions\LettsException $e,
+        string $method, string $phase, string $mission,
+        ?string $route, int|string|null $host, array $match, ?string $lane,
+        array $input, array $files, ?string $timeout, ?string $missionId,
+    ): void {
+        if ($this->onLaunchFailure === null) {
+            return;
+        }
+        $failure = new \Letts\Result\LaunchFailure(
+            exception: $e,
+            retryable: RetryClient::isRetryable($e),
+            method: $method, phase: $phase, mission: $mission,
+            route: $route, host: $host, match: $match, lane: $lane,
+            input: $input, files: $files, timeout: $timeout, missionId: $missionId,
+        );
+        try {
+            ($this->onLaunchFailure)($failure);
+        } catch (\Throwable $t) {
+            error_log('letts failure observer threw: ' . $t->getMessage());
+        }
+    }
 
     /**
      * @param list<string>            $match
@@ -186,11 +236,48 @@ final class Client
         ?string $timeout = null,
         ?string $missionId = null,
     ): string {
-        $exec = new \Letts\Internal\Client\DispatchExecutor($this);
-        return $exec->dispatch(
-            $route, $host, $this->effectiveMatch($route, $host, $match),
-            $lane, $mission, $input, $files, $timeout, $missionId,
-        )['missionId'];
+        // Assign the id pre-flight so a launch failure can carry it (for an
+        // idempotent retry with the same Idempotency-Key).
+        $missionId ??= \Letts\Internal\IdsUuidV7::generate();
+        try {
+            return (new \Letts\Internal\Client\DispatchExecutor($this))->dispatch(
+                $route, $host, $this->effectiveMatch($route, $host, $match),
+                $lane, $mission, $input, $files, $timeout, $missionId,
+            )['missionId'];
+        } catch (\Letts\Exceptions\LettsException $e) {
+            $this->reportLaunchFailure($e, 'dispatch', 'dispatch', $mission, $route, $host, $match, $lane, $input, $files, $timeout, $missionId);
+            throw $e;
+        }
+    }
+
+    /**
+     * Fire-and-forget dispatch: identical to dispatch() but, instead of throwing
+     * on a launch failure, returns null after the failure observer has run. Use
+     * for bulk loops where one unreachable dugdale must not abort the rest.
+     *
+     * @param list<string>          $match
+     * @param array<string, mixed>  $input
+     * @param array<string, string> $files
+     */
+    public function tryDispatch(
+        string  $mission,
+        ?string $route = null, int|string|null $host = null, array $match = [],
+        ?string $lane = null,
+        array   $input = [],
+        array   $files = [],
+        ?string $timeout = null,
+        ?string $missionId = null,
+    ): ?string {
+        $missionId ??= \Letts\Internal\IdsUuidV7::generate();
+        try {
+            return (new \Letts\Internal\Client\DispatchExecutor($this))->dispatch(
+                $route, $host, $this->effectiveMatch($route, $host, $match),
+                $lane, $mission, $input, $files, $timeout, $missionId,
+            )['missionId'];
+        } catch (\Letts\Exceptions\LettsException $e) {
+            $this->reportLaunchFailure($e, 'tryDispatch', 'dispatch', $mission, $route, $host, $match, $lane, $input, $files, $timeout, $missionId);
+            return null;
+        }
     }
 
     /**

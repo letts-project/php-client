@@ -10,7 +10,9 @@ use Letts\Exceptions\BackpressureException;
 use Letts\Exceptions\BadRequestException;
 use Letts\Exceptions\ConflictException;
 use Letts\Exceptions\DispatchException;
+use Letts\Exceptions\LettsException;
 use Letts\Exceptions\NetworkException;
+use Letts\Exceptions\StagingException;
 use Letts\Internal\Http\Event;
 use Letts\Result\HostError;
 use Letts\Result\HostResult;
@@ -52,6 +54,8 @@ final class ParallelExecutor
 
         foreach ($jobs as $i => $j) {
             $hostHint = (string) ($j['host'] ?? '');
+            // Assign the id pre-flight so a per-host launch failure carries it.
+            $mid = \Letts\Internal\IdsUuidV7::generate();
             try {
                 $dr = (new DispatchExecutor($this->client))->dispatch(
                     $j['route'] ?? null,
@@ -62,7 +66,7 @@ final class ParallelExecutor
                     $j['input'] ?? [],
                     $j['files'] ?? [],
                     $j['timeout'] ?? null,
-                    null,
+                    $mid,
                 );
                 $resp = $this->client->rawTransportFor($dr['host'], Scope::Dispatch)
                     ->streamRequest('GET', "/v1/missions/{$dr['missionId']}/events?follow=true");
@@ -72,15 +76,27 @@ final class ParallelExecutor
                 ];
             } catch (AuthException $e) {
                 $results[$i] = new HostResult($hostHint, null, new HostError('auth', $e->getMessage(), 401));
+                $this->reportJobFailure($e, 'dispatch', $j, $mid);
             } catch (BadRequestException $e) {
                 $results[$i] = new HostResult($hostHint, null, new HostError('bad_request', $e->getMessage(), 400));
+                $this->reportJobFailure($e, 'dispatch', $j, $mid);
             } catch (ConflictException $e) {
                 $results[$i] = new HostResult($hostHint, null, new HostError('conflict', $e->getMessage(), 409));
+                $this->reportJobFailure($e, 'dispatch', $j, $mid);
             } catch (BackpressureException $e) {
                 $results[$i] = new HostResult($hostHint, null, new HostError('backpressure', $e->getMessage(), 503));
+                $this->reportJobFailure($e, 'dispatch', $j, $mid);
+            } catch (StagingException $e) {
+                // Files are uploaded before the POST; without this arm a bad file
+                // would escape and abort the entire fan-out.
+                $results[$i] = new HostResult($hostHint, null, new HostError('staging', $e->getMessage(), null));
+                $this->reportJobFailure($e, 'dispatch', $j, $mid);
             } catch (NetworkException|DispatchException $e) {
                 $results[$i] = new HostResult($hostHint, null, new HostError('network', $e->getMessage(), null));
+                $this->reportJobFailure($e, 'dispatch', $j, $mid);
             }
+            // ConfigException / NoMatchingDugdaleException are intentionally NOT
+            // caught — they are config-level and propagate (see design §5.2).
         }
 
         if ($followers !== []) {
@@ -98,16 +114,32 @@ final class ParallelExecutor
                         new HostError('timeout', 'wait-timeout exceeded before a terminal event', null),
                     );
                 } else {
-                    $results[$i] = new HostResult(
-                        $f['host'], null,
-                        new HostError('network', 'event stream ended without a terminal event', null),
-                    );
+                    // Mission launched but its stream dropped before a terminal
+                    // event — a stream-phase launch failure (no reconnect here).
+                    $err = new NetworkException($f['host'], 'event stream ended without a terminal event');
+                    $results[$i] = new HostResult($f['host'], null, new HostError('network', $err->getMessage(), null));
+                    $this->reportJobFailure($err, 'stream', $jobs[$i], $f['mid']);
                 }
             }
         }
 
         ksort($results);
         return array_values($results);
+    }
+
+    /**
+     * Notify the Client failure observer for one failed fan-out job. timeout
+     * HostErrors do not come here — the mission is still running (see §5).
+     *
+     * @param array<string, mixed> $job
+     */
+    private function reportJobFailure(LettsException $e, string $phase, array $job, ?string $missionId): void
+    {
+        $this->client->reportLaunchFailure(
+            $e, 'runParallel', $phase, (string) $job['mission'],
+            $job['route'] ?? null, $job['host'] ?? null, $job['match'] ?? [], $job['lane'] ?? null,
+            $job['input'] ?? [], $job['files'] ?? [], $job['timeout'] ?? null, $missionId,
+        );
     }
 
     /**

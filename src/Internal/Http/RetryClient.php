@@ -63,8 +63,11 @@ final class RetryClient
      * (404/410/412/413/429 …) is a definitive client-side condition — retrying
      * is wasteful and, for 429, harmful. The HTTP status is stored
      * as the exception code by HttpTransport::mapError.
+     *
+     * Public + static so the failure observer (Client::reportLaunchFailure) can
+     * reuse the exact same transient/terminal classification for LaunchFailure::retryable.
      */
-    private static function isRetryable(\Throwable $e): bool
+    public static function isRetryable(\Throwable $e): bool
     {
         if ($e instanceof NetworkException) {
             return true;
