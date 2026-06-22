@@ -143,6 +143,18 @@ final class ExtendsMergerTest extends TestCase
         $this->assertSame('socks5h://127.0.0.1:9050', $merged->dugdales[0]->proxy);
     }
 
+    public function testProxyNullDeletesInheritedProxy(): void
+    {
+        // `proxy: null` on the dugdale opts out of the template's proxy entirely
+        // (connect directly), like `lane: null` deletes an inherited lane.
+        $c = new Config(
+            templates: ['k' => new Template(proxy: 'socks5h://10.0.0.1:1080')],
+            dugdales: [new Dugdale(id: 's1', extends: 'k', proxyNullified: true)],
+        );
+        $merged = ExtendsMerger::merge($c);
+        $this->assertSame('', $merged->dugdales[0]->proxy);
+    }
+
     public function testUnknownTemplateThrows(): void
     {
         $c = new Config(dugdales: [new Dugdale(id: 's1', extends: 'missing')]);

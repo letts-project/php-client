@@ -155,6 +155,10 @@ final class ConfigParser
                     }
                 }
             }
+            // An explicit `proxy: null` means "delete the inherited proxy"
+            // (connect directly), mirroring `lane: null`. yaml.v3 collapses null
+            // to '' so we detect it from the raw entry before casting.
+            $proxyNullified = array_key_exists('proxy', $entry) && $entry['proxy'] === null;
             $out[] = new Dugdale(
                 id: $id,
                 host: (string) ($entry['host'] ?? ''),
@@ -170,6 +174,7 @@ final class ConfigParser
                 execToken: (string) ($entry['exec_token'] ?? ''),
                 lanes: self::buildLanes($laneEntries),
                 nullifiedLanes: $nullifiedLanes,
+                proxyNullified: $proxyNullified,
             );
         }
         return $out;

@@ -68,7 +68,9 @@ final class ExtendsMerger
             host: $d->host,
             port: $d->port,
             url: $d->url,
-            proxy: $d->proxy !== '' ? $d->proxy : $t->proxy,
+            // `proxy: null` on the dugdale deletes the inherited proxy (connect
+            // directly); otherwise dugdale-wins, falling back to the template.
+            proxy: $d->proxyNullified ? '' : ($d->proxy !== '' ? $d->proxy : $t->proxy),
             extends: $d->extends,
             missionDir: $d->missionDir !== '' ? $d->missionDir : $t->missionDir,
             runtime: $runtime,
@@ -78,6 +80,7 @@ final class ExtendsMerger
             execToken: $d->execToken !== '' ? $d->execToken : $t->execToken,
             lanes: $lanes,
             nullifiedLanes: $d->nullifiedLanes,
+            proxyNullified: $d->proxyNullified,
         );
     }
 }

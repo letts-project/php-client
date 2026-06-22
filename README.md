@@ -552,7 +552,9 @@ dugdales:
   `${ENV}` placeholders are substituted at use.
 - For SOCKS, DNS is always resolved **at the proxy**: `socks5://` is normalized
   to `socks5h://` before the request, matching the Go client. Write `socks5h://`.
-- A dugdale's own `proxy` overrides the one it inherits via `extends`.
+- A dugdale's own `proxy` overrides the one it inherits via `extends`. Set
+  `proxy: null` to opt a single dugdale out of an inherited proxy and connect to
+  it directly — the same delete-the-inherited semantics as `lane: null`.
 - Pass `['ignore_proxy' => true]` to `Client::fromConfig()` to ignore all
   `proxy:` directives and connect to dugdales directly.
 

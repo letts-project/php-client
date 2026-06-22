@@ -10,6 +10,8 @@ final readonly class Dugdale
      * @param array<string, LaneCfg> $lanes
      * @param list<string>           $nullifiedLanes  lanes set to `null` in YAML
      *                               (delete-from-template markers)
+     * @param bool                   $proxyNullified  `proxy: null` set explicitly
+     *                               in YAML (delete-inherited-proxy marker)
      */
     public function __construct(
         public string $id,
@@ -26,6 +28,7 @@ final readonly class Dugdale
         public string $execToken = '',
         public array $lanes = [],
         public array $nullifiedLanes = [],
+        public bool $proxyNullified = false,
     ) {}
 
     public function hasLane(string $lane): bool

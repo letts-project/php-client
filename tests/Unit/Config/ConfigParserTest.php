@@ -41,6 +41,19 @@ final class ConfigParserTest extends TestCase
         $this->assertSame('socks5h://10.0.0.1:1080', $c->templates['k']->proxy);
     }
 
+    public function testProxyNullMarksNullified(): void
+    {
+        $c = ConfigParser::parse("dugdales:\n  - id: s1\n    host: h\n    proxy: null\n");
+        $this->assertSame('', $c->dugdales[0]->proxy);
+        $this->assertTrue($c->dugdales[0]->proxyNullified);
+    }
+
+    public function testProxyAbsentIsNotNullified(): void
+    {
+        $c = ConfigParser::parse("dugdales:\n  - id: s1\n    host: h\n");
+        $this->assertFalse($c->dugdales[0]->proxyNullified);
+    }
+
     public function testParseFullExample(): void
     {
         $yaml = <<<YAML
