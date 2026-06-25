@@ -33,6 +33,15 @@ final class MissionStandaloneTest extends TestCase
         $m->checkSignal();
     }
 
+    public function testOnInterruptCallbackRunsOnSignal(): void
+    {
+        $m = Mission::startStandalone(['s.php']);
+        $sig = null;
+        $m->onInterrupt(function (int $s) use (&$sig) { $sig = $s; });
+        $m->forceInterruptForTest();
+        $this->assertSame(SIGTERM, $sig);
+    }
+
     public function testStandaloneFileFallsBackToInputPath(): void
     {
         $tmp = tempnam(sys_get_temp_dir(), 'mf');

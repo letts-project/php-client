@@ -213,6 +213,18 @@ final class Mission
         }
     }
 
+    /**
+     * Register a callback to run when the mission receives SIGTERM/SIGINT (e.g. a
+     * letts kill). Runs in addition to the interrupt flag that checkSignal()
+     * polls — use it to cooperatively stop a long-running blocking call (a
+     * parser, a download loop) that can't poll checkSignal() itself. The callback
+     * receives the signal number; keep it short (it runs in the signal handler).
+     */
+    public function onInterrupt(\Closure $cb): void
+    {
+        $this->signals->onSignal($cb);
+    }
+
     /** Test helper — sets the signal flag without sending an actual signal. */
     public function forceInterruptForTest(): void
     {

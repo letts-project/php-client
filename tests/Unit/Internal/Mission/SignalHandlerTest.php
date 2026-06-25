@@ -26,4 +26,17 @@ final class SignalHandlerTest extends TestCase
         $h = SignalHandler::install();
         $this->assertInstanceOf(SignalHandler::class, $h);
     }
+
+    public function testOnSignalCallbacksRunOnHandleAndFlagStillSet(): void
+    {
+        $h = new SignalHandler();
+        $seen = [];
+        $h->onSignal(function (int $sig) use (&$seen) { $seen[] = $sig; });
+        $h->onSignal(function () use (&$seen) { $seen[] = 'second'; });
+
+        $h->handle(SIGTERM);
+
+        $this->assertTrue($h->interruptRequested());
+        $this->assertSame([SIGTERM, 'second'], $seen);
+    }
 }
