@@ -131,4 +131,67 @@ final class EventStreamTest extends TestCase
         $this->expectException(\Letts\Exceptions\BadRequestException::class);
         $es->follow('/v1/missions/m/events', fn() => true);
     }
+
+    public function testQuietStreamStaysOnOneConnectionAcrossIdlePolls(): void
+    {
+        // A mission that falls silent between events (the '' chunks become idle
+        // timeout polls) must NOT trigger a reconnect: streamOnce re-enters
+        // stream() on the SAME response. maxReconnects:0 makes any reconnect a
+        // fatal budget error, and only ONE response is supplied — so the old
+        // single-foreach code (which ended after the first idle poll and let
+        // follow() reconnect) would both exhaust the budget and run out of
+        // responses. Passing proves the connection is held across idle polls.
+        $body = (static function () {
+            yield json_encode(['seq' => 1, 'event' => 'queued']) . "\n";
+            yield '';                                                          // idle poll
+            yield '';                                                          // idle poll
+            yield json_encode(['seq' => 2, 'event' => 'running']) . "\n";
+            yield '';                                                          // idle poll
+            yield json_encode(['seq' => 3, 'event' => 'done', 'status' => 'success']) . "\n";
+        })();
+        $mock = new MockHttpClient(new MockResponse($body, [
+            'response_headers' => ['content-type: application/x-ndjson'],
+        ]));
+        $es = new EventStream(new HttpTransport($mock, 'http://h', 'tok'));
+
+        $seen = [];
+        $es->follow('/v1/missions/m/events?follow=true', function ($ev) use (&$seen): bool {
+            $seen[] = $ev->event;
+            return $ev->event !== 'done';
+        }, maxReconnects: 0);
+
+        $this->assertSame(['queued', 'running', 'done'], $seen);
+        $this->assertSame(1, $mock->getRequestsCount(), 'quiet stream must stay on ONE connection (no reconnects)');
+    }
+
+    public function testRepeated5xxConsumesBudgetAndFailsFast(): void
+    {
+        // A server that keeps returning 5xx delivers no events, so every
+        // reconnect is event-less and must consume the budget — failing fast at
+        // the cap. Regression guard: the budget reset keys on NEW EVENTS, never
+        // on the connection merely having been reachable/alive.
+        $mock = new MockHttpClient(fn() => new MockResponse('boom', ['http_code' => 503]));
+        $es = new EventStream(new HttpTransport($mock, 'http://h', 'tok'));
+
+        $this->expectException(\Letts\Exceptions\NetworkException::class);
+        $es->follow('/v1/missions/m/events', fn() => true, maxReconnects: 2);
+    }
+
+    public function testBudgetExhaustionMessageNamesPathAndReasons(): void
+    {
+        // Every connection establishes but ends immediately with no events, so
+        // the consecutive-failure budget trips. The error must name the mission
+        // path and the per-reconnect reasons so the cause is diagnosable.
+        $mock = new MockHttpClient(fn() => new MockResponse([''], ['http_code' => 200]));
+        $es = new EventStream(new HttpTransport($mock, 'http://h', 'tok'));
+
+        try {
+            $es->follow('/v1/missions/abc123/events?follow=true', fn() => true, maxReconnects: 2);
+            $this->fail('expected NetworkException for an event-less, fast-EOFing stream');
+        } catch (\Letts\Exceptions\NetworkException $e) {
+            $this->assertStringContainsString('/v1/missions/abc123/events', $e->getMessage());
+            $this->assertStringContainsString('eof', $e->getMessage());
+            $this->assertStringContainsString('recent reconnects', $e->getMessage());
+        }
+    }
 }
