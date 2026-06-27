@@ -99,4 +99,36 @@ final class EventStreamTest extends TestCase
         }, maxReconnects: 3);
         $this->assertSame([1, 2, 3, 4, 5], $seqs);
     }
+
+    public function testFourxxStatusMapsToLettsExceptionWithBody(): void
+    {
+        // A definitive 4xx aborts the whole follow() and maps (with its body)
+        // to the Letts exception hierarchy — read off the first chunk now that
+        // streamOnce() no longer calls getStatusCode() before the poll loop.
+        $mock = new MockHttpClient(fn() => new MockResponse(
+            ['{"error":"not_found","message":"mission not found"}'],
+            ['http_code' => 404],
+        ));
+        $es = new EventStream(new HttpTransport($mock, 'http://h', 'tok'));
+
+        try {
+            $es->follow('/v1/missions/m/events', fn() => true);
+            $this->fail('expected a Letts exception for 404');
+        } catch (\Letts\Exceptions\DispatchException $e) {
+            $this->assertStringContainsString('404', $e->getMessage());
+            $this->assertStringContainsString('mission not found', $e->getMessage());
+        }
+    }
+
+    public function testFourHundredMapsToBadRequest(): void
+    {
+        $mock = new MockHttpClient(fn() => new MockResponse(
+            ['{"error":"invalid_id","message":"bad id"}'],
+            ['http_code' => 400],
+        ));
+        $es = new EventStream(new HttpTransport($mock, 'http://h', 'tok'));
+
+        $this->expectException(\Letts\Exceptions\BadRequestException::class);
+        $es->follow('/v1/missions/m/events', fn() => true);
+    }
 }

@@ -21,9 +21,11 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  * (the fread path would surface each idle period as a PHP warning). The poll
  * cadence also bounds how late a wait deadline can fire.
  *
- * HTTP errors (4xx) are mapped to the Letts exception hierarchy before any
- * body is interpreted as a stream; 5xx and transport drops consume the
- * reconnect budget with a short backoff between attempts.
+ * The status is read off the first chunk, never via a blocking accessor before
+ * the poll loop (that would stall ~30s on a quiet mission, whose 200 headers
+ * dugdale defers until the first event, and burn the reconnect budget): 4xx
+ * maps to the Letts exception hierarchy (definitive); 5xx and transport drops
+ * consume the reconnect budget with a short backoff between attempts.
  */
 final class EventStream
 {
@@ -81,27 +83,15 @@ final class EventStream
     private function streamOnce(string $url, \Closure $onEvent, int &$lastSeq, ?float $deadline): bool
     {
         $response = $this->transport->streamRequest('GET', $url);
-        try {
-            $status = $response->getStatusCode();
-        } catch (TransportExceptionInterface) {
-            $response->cancel();
-            return false; // connect failure — reconnectable
-        }
-        if ($status >= 500) {
-            $response->cancel();
-            return false; // transient server error — reconnectable
-        }
-        if ($status >= 400) {
-            // Auth/gone/not-found: the body is an error document, not a
-            // stream, and asking again will not change the answer.
-            try {
-                $body = $response->getContent(false);
-            } catch (TransportExceptionInterface) {
-                $body = '';
-            }
-            throw HttpTransport::mapError($status, $body);
-        }
 
+        // Do NOT call $response->getStatusCode() before the poll loop: dugdale
+        // defers the 200 header flush until the first event, so a quiet mission
+        // (a long ffmpeg step that emits nothing for minutes) would block that
+        // accessor until the 30s request-inactivity timeout fires — returning a
+        // needless reconnect every ~30s and exhausting the reconnect budget. We
+        // poll instead (idle yields timeout chunks that keep the connection
+        // alive) and read the status off the first chunk, once headers arrive.
+        $errStatus = null;
         $buf = '';
         try {
             foreach ($this->transport->streamChunks($response, self::POLL_SECONDS) as $chunk) {
@@ -111,6 +101,22 @@ final class EventStream
                     continue;
                 }
                 if ($chunk->isFirst()) {
+                    // Headers are in now — getStatusCode() no longer blocks.
+                    $status = $response->getStatusCode();
+                    if ($status >= 500) {
+                        $response->cancel();
+                        return false; // transient server error — reconnectable
+                    }
+                    if ($status >= 400) {
+                        // Auth/gone/not-found: the body is an error document, not
+                        // a stream. Collect it from the chunks below (it's tiny
+                        // and the connection closes right after), then map+throw.
+                        $errStatus = $status;
+                    }
+                    continue;
+                }
+                if ($errStatus !== null) {
+                    $buf .= $chunk->getContent();
                     continue;
                 }
                 $buf .= $chunk->getContent();
@@ -135,9 +141,15 @@ final class EventStream
                 }
                 $this->assertDeadline($deadline, $response);
             }
+            if ($errStatus !== null) {
+                // Definitive HTTP refusal — abort the whole follow (not a
+                // TransportException, so it escapes the catch below).
+                $response->cancel();
+                throw HttpTransport::mapError($errStatus, $buf);
+            }
         } catch (TransportExceptionInterface) {
             $response->cancel();
-            return false; // dropped mid-stream — reconnectable
+            return false; // connect failure / dropped mid-stream — reconnectable
         }
         return false; // clean EOF without a stop signal — reconnectable
     }
