@@ -31,10 +31,16 @@ final class ControlChannel
     /** @param array<string, mixed> $event */
     public function emit(array $event): void
     {
-        $line = json_encode($event, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION) . "\n";
+        $kind = $event['event'] ?? null;
+        $flags = JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION
+            | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+        if ($kind === 'fail') {
+            // A failure must reach dugdale even when its text is not valid UTF-8.
+            $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+        }
+        $line = json_encode($event, $flags) . "\n";
         fwrite($this->fd, $line);
         fflush($this->fd);
-        $kind = $event['event'] ?? null;
         if ($kind === 'success' || $kind === 'fail') {
             $this->finalEmitted = true;
         }
