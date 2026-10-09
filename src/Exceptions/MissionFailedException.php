@@ -15,7 +15,25 @@ final class MissionFailedException extends LettsException
         private readonly ?array $failDetails,
         private readonly ?RunResult $result,
     ) {
-        parent::__construct('mission failed: ' . ($failMessage ?? '(no message)'));
+        parent::__construct(self::buildMessage($outcome, $reason, $failMessage));
+    }
+
+    private static function buildMessage(string $outcome, ?string $reason, ?string $failMessage): string
+    {
+        $reason ??= '';
+        if ($outcome === 'failed') {
+            $label = $reason === 'explicit' ? '' : $reason;
+        } else {
+            $label = $reason === '' ? $outcome : $outcome . '/' . $reason;
+        }
+        $message = 'mission failed';
+        if ($label !== '') {
+            $message .= ': ' . $label;
+        }
+        if ($failMessage !== null && $failMessage !== '') {
+            $message .= ': ' . $failMessage;
+        }
+        return $message;
     }
 
     public function getOutcome(): string { return $this->outcome; }
